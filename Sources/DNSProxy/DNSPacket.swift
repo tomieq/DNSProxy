@@ -7,9 +7,9 @@
 
 import Foundation
 
-struct DNSPacket {
+public struct DNSPacket {
     /// Extracts the queried domain name (e.g. "://example.com") from a raw DNS query
-    static func extractDomain(from bytes: [UInt8]) -> String? {
+    public static func extractDomain(from bytes: [UInt8]) -> String? {
         // DNS header is 12 bytes
         guard bytes.count > 12 else { return nil }
         
@@ -34,7 +34,7 @@ struct DNSPacket {
     }
     
     /// Takes a raw DNS query packet and flips its header flags to return NXDOMAIN (Blocked)
-    static func makeBlockedResponse(from query: [UInt8]) -> [UInt8]? {
+    public static func makeBlockedResponse(from query: [UInt8]) -> [UInt8]? {
         guard query.count >= 12 else { return nil }
         var response = query
         
@@ -49,7 +49,7 @@ struct DNSPacket {
         return response
     }
     
-    static func redirectDomain(from query: [UInt8], redirectIP: String = "192.168.100.1") -> [UInt8]? {
+    public static func redirectDomain(from query: [UInt8], redirectIP: String = "192.168.100.1") -> [UInt8]? {
         // 1. Validate header (12 bytes) and find the end of the Question section
         guard query.count > 12 else { return nil }
         
