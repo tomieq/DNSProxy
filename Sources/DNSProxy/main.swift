@@ -9,6 +9,8 @@ let SOCK_DGRAM_VALUE = Int32(SOCK_DGRAM.rawValue)
 #endif
 
 // MARK: - Blocklist & Packet Helpers
+let redirectIP = ProcessInfo.processInfo.environment["DNS_REDIRECT_IP"] ?? "192.168.100.1"
+
 let blockedDomains: Set<String> = [
     "doubleclick.net",
     "googleadservices.com",
@@ -64,9 +66,9 @@ func startDNSProxy(port: UInt16 = 5353, upstreamIP: String = "8.8.8.8") {
         let currentClient = clientAddr
 
         if isBlocked(domain) {
-            print("[BLOCKED] \(domain)")
-            if let blockedReply = DNSPacket.makeBlockedResponse(from: query) {
-                sendUDP(sock: serverSock, data: blockedReply, to: currentClient)
+            print("[REDIRECT] \(domain) -> \(redirectIP)")
+            if let redirectReply = DNSPacket.redirectDomain(from: query, redirectIP: redirectIP) {
+                sendUDP(sock: serverSock, data: redirectReply, to: currentClient)
             }
             continue
         }
