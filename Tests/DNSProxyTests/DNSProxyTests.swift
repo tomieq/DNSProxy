@@ -186,3 +186,42 @@ func makeQuery(domain: String, qtype: UInt16 = 1, qclass: UInt16 = 1, id: UInt16
         #expect(!empty.isBlocked("anything.com"))
     }
 }
+
+// MARK: - HijackList
+
+@Suite("HijackList") struct HijackListTests {
+    let hijacklist = HijackList(entries: [
+        "hijacked.example.com": "192.168.100.50",
+        "a.example.com": "10.0.0.1"
+    ])
+
+    @Test func exactMatchReturnsIP() {
+        #expect(hijacklist.redirectIP(for: "hijacked.example.com") == "192.168.100.50")
+    }
+
+    @Test func subdomainReturnsIP() {
+        #expect(hijacklist.redirectIP(for: "www.hijacked.example.com") == "192.168.100.50")
+    }
+
+    @Test func deepSubdomainReturnsIP() {
+        #expect(hijacklist.redirectIP(for: "x.y.a.example.com") == "10.0.0.1")
+    }
+
+    @Test func mostSpecificEntryWins() {
+        #expect(hijacklist.redirectIP(for: "a.example.com") == "10.0.0.1")
+        #expect(hijacklist.redirectIP(for: "a.example.com.parent.hijacked.example.com") == "192.168.100.50")
+    }
+
+    @Test func unknownDomainReturnsNil() {
+        #expect(hijacklist.redirectIP(for: "example.org") == nil)
+    }
+
+    @Test func suffixWithoutDotDoesNotMatch() {
+        #expect(hijacklist.redirectIP(for: "xhijacked.example.com") == nil)
+    }
+
+    @Test func emptyHijacklistReturnsNil() {
+        let empty = HijackList(entries: [:])
+        #expect(empty.redirectIP(for: "anything.com") == nil)
+    }
+}

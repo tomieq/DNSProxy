@@ -2,25 +2,32 @@
 
 A pure Swift DNS proxy written with raw POSIX UDP sockets — no third-party dependencies.
 
-It listens on a UDP port, forwards DNS queries to an upstream resolver (Google's `8.8.8.8` by default), and intercepts queries for blocked domains, answering them with an A record that points to a configurable redirect IP (e.g. a local block/ads-filter page).
+It listens on a UDP port and forwards DNS queries to an upstream resolver (Google's `8.8.8.8` by default). It intercepts queries for:
+- **hijacked** domains — answered with a forged A record pointing to the per-domain redirect IP.
+- **blocked** domains — answered with NXDOMAIN, so the client treats the domain as non-existent.
 
 ## How it works
 
 1. A client sends a DNS query to the proxy (UDP).
-2. The queried domain is extracted from the packet and checked against the blocklist.
-   - **Blocked** → the proxy replies directly with a forged response: the question section is kept and an A record (`<redirectIP>`, TTL 60s) is appended. No upstream call is made.
+2. The queried domain is extracted from the packet and checked against the hijacklist, then the blocklist.
+   - **Hijacked** → the proxy replies directly with a forged response: the question section is kept and an A record pointing to the domain's configured IP (TTL 60s) is appended. No upstream call is made.
+   - **Blocked** → the proxy replies directly with NXDOMAIN (RCODE 3), all record counts zeroed. No upstream call is made.
    - **Allowed** → the query is forwarded to the upstream resolver and its answer is relayed back to the client.
-3. Non-A queries (e.g. AAAA) for blocked domains get an empty NOERROR response (no record).
+3. Non-A queries (e.g. AAAA) for hijacked domains get an empty NOERROR response (no record).
 
-The blocklist matches exact domains and all of their subdomains (`ads.doubleclick.net` is blocked when `doubleclick.net` is listed).
+Both lists match exact domains and all of their subdomains (`ads.doubleclick.net` matches when `doubleclick.net` is listed). When a domain matches several hijacklist entries, the most specific (longest) one wins.
 
-Blocked domains are defined in `Sources/DNSProxyCLI/main.swift`:
+Domains are defined in `Sources/DNSProxyCLI/main.swift`:
 
 ```swift
 let blockedDomains: Set<String> = [
     "doubleclick.net",
     "googleadservices.com",
     "://example.com"
+]
+
+let hijackedDomains: [String: String] = [
+    "hijacked.example.com": "192.168.100.50"
 ]
 ```
 
@@ -30,8 +37,9 @@ let blockedDomains: Set<String> = [
 Sources/
   DNSProxy/            # library: all logic, unit-testable
     DNSPacket.swift    #   packet parsing: extractDomain, redirectDomain, makeBlockedResponse
-    Blocklist.swift    #   domain blocklist + subdomain matching
-    DNSProxyServer.swift #  POSIX UDP server loop, upstream forwarding
+     Blocklist.swift    #   domain blocklist + subdomain matching
+     HijackList.swift   #   domain -> IP redirections + subdomain matching
+     DNSProxyServer.swift #  POSIX UDP server loop, upstream forwarding
   DNSProxyCLI/
     main.swift         # entry point: env config, starts the server
 Tests/
@@ -64,12 +72,11 @@ Configuration via environment variables:
 | Variable           | Default         | Description                          |
 |--------------------|-----------------|--------------------------------------|
 | `DNS_PORT`         | `8353`          | UDP port the proxy listens on        |
-| `DNS_REDIRECT_IP`  | `192.168.100.1` | IP returned for blocked domains      |
 
 Example:
 
 ```bash
-DNS_PORT=8353 DNS_REDIRECT_IP=10.0.0.5 swift run DNSProxyCLI
+DNS_PORT=8353 swift run DNSProxyCLI
 ```
 
 > Note: binding port 53 requires root (or `sudo`).
@@ -92,30 +99,35 @@ The Dockerfile cross-builds for Linux (aarch64 for Raspberry Pi, x86_64 for Inte
 
 Start the proxy (default port `8353`), then in another terminal:
 
-**Blocked domain → returns the redirect IP:**
+**Hijacked domain → returns its configured IP:**
+
+```bash
+dig @127.0.0.1 -p 8353 hijacked.example.com +short
+# 192.168.100.50
+```
+
+**Hijacked subdomain → also redirected:**
+
+```bash
+dig @127.0.0.1 -p 8353 www.hijacked.example.com +short
+# 192.168.100.50
+```
+
+**Blocked domain → NXDOMAIN:**
 
 ```bash
 dig @127.0.0.1 -p 8353 doubleclick.net +short
-# 192.168.100.1
+# (empty)
+
+dig @127.0.0.1 -p 8353 doubleclick.net
+# STATUS: NXDOMAIN
 ```
 
-**Blocked subdomain → also redirected:**
+**Blocked subdomain → also NXDOMAIN:**
 
 ```bash
 dig @127.0.0.1 -p 8353 ads.doubleclick.net +short
-# 192.168.100.1
-```
-
-**Full response (shows the forged A record, TTL 60, NOERROR):**
-
-```bash
-dig @127.0.0.1 -p 8353 doubleclick.net
-```
-
-```
-STATUS: NOERROR
-ANSWER: 1
-doubleclick.net.    60    IN  A   192.168.100.1
+# (empty)
 ```
 
 **Allowed domain → forwarded to 8.8.8.8 and relayed:**
@@ -125,10 +137,10 @@ dig @127.0.0.1 -p 8353 example.com +short
 # 93.184.215.14 (or whatever Google returns)
 ```
 
-**AAAA query for a blocked domain → NOERROR with no answer:**
+**AAAA query for a hijacked domain → NOERROR with no answer:**
 
 ```bash
-dig @127.0.0.1 -p 8353 doubleclick.net AAAA +short
+dig @127.0.0.1 -p 8353 hijacked.example.com AAAA +short
 # (empty)
 ```
 
@@ -143,7 +155,7 @@ swift test
 ```
 
 ```
-Test run with 24 tests in 4 suites passed
+Test run with 31 tests in 5 suites passed
 ```
 
-Covered: domain extraction (multi-label, upper/lower case, malformed/compressed packets), NXDOMAIN response flags, redirect A-record layout (TTL, RDLENGTH, RDATA), non-A queries, and blocklist subdomain matching.
+Covered: domain extraction (multi-label, upper/lower case, malformed/compressed packets), NXDOMAIN response flags, redirect A-record layout (TTL, RDLENGTH, RDATA), non-A queries, blocklist subdomain matching, and hijacklist matching (exact, subdomain, most-specific entry wins).

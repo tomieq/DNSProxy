@@ -9,18 +9,18 @@ let SOCK_DGRAM_VALUE = Int32(SOCK_DGRAM.rawValue)
 #endif
 
 /// Pure POSIX UDP DNS proxy: forwards queries to an upstream server,
-/// answering blocked domains with a redirect A record.
+/// answering hijacked domains with a redirect A record and blocked domains with NXDOMAIN.
 public struct DNSProxyServer {
     public let port: UInt16
     public let upstreamIP: String
-    public let redirectIP: String
     public let blocklist: Blocklist
+    public let hijacklist: HijackList
 
-    public init(port: UInt16, upstreamIP: String = "8.8.8.8", redirectIP: String, blocklist: Blocklist) {
+    public init(port: UInt16, upstreamIP: String = "8.8.8.8", blocklist: Blocklist, hijacklist: HijackList = HijackList(entries: [:])) {
         self.port = port
         self.upstreamIP = upstreamIP
-        self.redirectIP = redirectIP
         self.blocklist = blocklist
+        self.hijacklist = hijacklist
     }
 
     public func start() {
@@ -66,10 +66,18 @@ public struct DNSProxyServer {
             let domain = DNSPacket.extractDomain(from: query) ?? "unknown"
             let currentClient = clientAddr
 
-            if blocklist.isBlocked(domain) {
-                print("[REDIRECT] \(domain) -> \(redirectIP)")
-                if let redirectReply = DNSPacket.redirectDomain(from: query, redirectIP: redirectIP) {
+            if let hijackIP = hijacklist.redirectIP(for: domain) {
+                print("[HIJACKED] \(domain) -> \(hijackIP)")
+                if let redirectReply = DNSPacket.redirectDomain(from: query, redirectIP: hijackIP) {
                     sendUDP(sock: serverSock, data: redirectReply, to: currentClient)
+                }
+                continue
+            }
+
+            if blocklist.isBlocked(domain) {
+                print("[BLOCKED] \(domain)")
+                if let blockedReply = DNSPacket.makeBlockedResponse(from: query) {
+                    sendUDP(sock: serverSock, data: blockedReply, to: currentClient)
                 }
                 continue
             }
