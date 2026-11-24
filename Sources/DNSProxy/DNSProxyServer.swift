@@ -47,6 +47,7 @@ public struct DNSProxyServer {
         upstreamAddr.sin_family = sa_family_t(AF_INET)
         upstreamAddr.sin_port = UInt16(53).bigEndian
         inet_pton(AF_INET, upstreamIP, &upstreamAddr.sin_addr)
+        let upstream = upstreamAddr
 
         print("Pure Swift DNS Proxy listening on UDP port \(port)...")
 
@@ -94,7 +95,7 @@ public struct DNSProxyServer {
                 var timeout = timeval(tv_sec: 2, tv_usec: 0)
                 setsockopt(upstreamSock, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
-                sendUDP(sock: upstreamSock, data: query, to: upstreamAddr)
+                sendUDP(sock: upstreamSock, data: query, to: upstream)
 
                 var replyBuffer = [UInt8](repeating: 0, count: 512)
                 let replyLen = recvfrom(upstreamSock, &replyBuffer, replyBuffer.count, 0, nil, nil)

@@ -1,5 +1,6 @@
 # Stage 1: Build
-FROM swift:6.1 as builder
+FROM swift:6.1 AS builder
+WORKDIR /app
 COPY . .
 RUN swift build -c release
 # aarch64-unknown-linux-gnu for raspberry pi
